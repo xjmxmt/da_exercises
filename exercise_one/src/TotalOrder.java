@@ -7,6 +7,7 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
     private int time = 0;
     private int timeUnit = 1;
     private TotalOrder[] processList;
+    private int threadNum;
     private PriorityQueue<Message> receivedMsg = new PriorityQueue<Message>(new Comparator<Message>() {
         @Override
         public int compare(Message o1, Message o2) {
@@ -15,6 +16,7 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
         }
     });
     private HashMap<ScalarClock, Integer> ackMap = new HashMap<>();
+    private LinkedList<Message> receivedOrderedMsg = new LinkedList<>();
     private LinkedList<Message> deliveredMsg = new LinkedList<>();
 
     public TotalOrder() {
@@ -44,17 +46,31 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
     @Override
     public void setProcessList(TotalOrder[] registryList) throws RemoteException{
         this.processList = registryList;
+        this.threadNum = processList.length;
     }
 
     @Override
-    public TotalOrder[] getProcessList() {
+    public TotalOrder[] getProcessList() throws RemoteException{
         return processList;
     }
 
     @Override
     public void setAck(ScalarClock sc) throws RemoteException {
         if (ackMap.get(sc) == null) ackMap.put(sc, 1);
-        else ackMap.put(sc, ackMap.get(sc) + 1);
+        else {
+            ackMap.put(sc, ackMap.get(sc) + 1);
+            while (getReceivedMsg().size() != 0) {
+                Message front = getReceivedMsg().peek();
+                //System.out.println(id + " " + front);
+                assert front != null;
+                if (ackMap.get(front.scalarClock) == null) break;
+                if (ackMap.get(front.scalarClock) < threadNum - 1) break;
+                if (ackMap.get(front.scalarClock) == threadNum - 1) {
+                    deliver(getReceivedMsg().poll());
+                }
+            }
+        }
+
     }
 
     public HashMap<ScalarClock, Integer> getAckMap() throws RemoteException{
@@ -67,8 +83,13 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
     }
 
     @Override
+    public String getReceivedOrderedMsg() throws RemoteException {
+        return " received: " + this.receivedOrderedMsg;
+    }
+
+    @Override
     public String getDeliveredMsg() throws RemoteException {
-        return this.getName() + " delivered: " + this.deliveredMsg;
+        return " delivered: " + this.deliveredMsg;
     }
 
     @Override
@@ -77,24 +98,16 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
         Message msg = new Message();
         msg.setMessage(s, new ScalarClock(time, id));
 
-        for (TotalOrder obj : processList) {
+        // send message with RMI TotalOrder.receive()
+        this.receive(msg);
+        for (TotalOrder obj : processList)
+        if (obj != processList[id - 1])
+        {
             new Thread(() -> {
                 try {
+                    Thread.sleep(new Random().nextInt(100));
                     obj.receive(msg);
-                } catch (RemoteException e) {
-                    e.printStackTrace();
-                }
-            }).start();
-        }
-
-        for (TotalOrder obj : processList) {
-            new Thread(() -> {
-                try {
-                    while (obj.getReceivedMsg().size() != 0
-                            && obj.getAckMap().get(obj.getReceivedMsg().peek().scalarClock) == 3) {
-                        obj.deliver(obj.getReceivedMsg().poll());
-                    }
-                } catch (RemoteException e) {
+                } catch (RemoteException | InterruptedException e) {
                     e.printStackTrace();
                 }
             }).start();
@@ -106,10 +119,20 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
     @Override
     public void receive(Message msg) throws RemoteException {
         this.receivedMsg.add(msg);
+        this.receivedOrderedMsg.add(msg);
+        for (TotalOrder p : processList)
+            if (p != processList[id - 1])
+            {
+                new Thread(() -> {
+                    try {
+                        Thread.sleep(new Random().nextInt(100));
+                        p.setAck(msg.scalarClock);
+                    } catch (RemoteException | InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }).start();
 
-        for (TotalOrder p : processList) {
-            p.setAck(msg.scalarClock);
-        }
+            }
     }
 
     @Override

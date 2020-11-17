@@ -13,7 +13,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class TotalOrderMain {
     public static void main(String[] args) throws RemoteException, AlreadyBoundException, NotBoundException {
         Registry registry = LocateRegistry.createRegistry(1099);
-        final int TOTAL_THREADS = 3;
+        final int TOTAL_THREADS = 4;
         ExecutorService myExecutor = Executors.newFixedThreadPool(TOTAL_THREADS);
         TotalOrder[] objList = new TotalOrder[TOTAL_THREADS];
         final CyclicBarrier myBarrier = new CyclicBarrier(TOTAL_THREADS, new Runnable() {
@@ -23,7 +23,7 @@ public class TotalOrderMain {
                 for (TotalOrder obj : objList) {
                     try {
                         System.out.println(obj.getName() + " " + obj.getReceivedMsg());
-                        System.out.println(obj.getName() + " " + obj.getAckMap());
+                        System.out.println(obj.getName() + " " + obj.getReceivedOrderedMsg());
                         System.out.println(obj.getName() + " " + obj.getDeliveredMsg());
                     } catch (RemoteException e) {
                         e.printStackTrace();
@@ -42,7 +42,7 @@ public class TotalOrderMain {
 
         HashMap<Integer, String[]> msgToSend = new HashMap<>();
         try {
-            BufferedReader in = new BufferedReader(new FileReader("/Users/jennyxu/Desktop/Delft/Q2/Distributed_Algorithms/Exercises/exercise_one/src/msgToSend.txt"));
+            BufferedReader in = new BufferedReader(new FileReader("exercise_one/src/msgToSend.txt"));
             Integer i = 1;
             String str;
             while ((str = in.readLine()) != null) {
@@ -92,8 +92,9 @@ class MyThread implements Runnable {
             for (String string : strings) {
                 // broadcast the message
                 Message msg = obj.broadcast(string);
-                Thread.sleep(10 * new Random().nextInt(10));
+                Thread.sleep(300);
             }
+            Thread.sleep(1000);
             System.out.println("Thread " + myThreadIndex + " Done Now:" + System.currentTimeMillis());
         } catch (Exception e) {
             e.printStackTrace();

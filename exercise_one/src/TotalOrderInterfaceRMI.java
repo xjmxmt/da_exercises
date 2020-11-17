@@ -13,6 +13,7 @@ public interface TotalOrderInterfaceRMI extends Remote {
     public void setAck(ScalarClock sc) throws RemoteException;
     public HashMap<ScalarClock, Integer> getAckMap() throws RemoteException;
     public Queue<Message> getReceivedMsg() throws RemoteException;
+    public String getReceivedOrderedMsg() throws RemoteException;
     public String getDeliveredMsg() throws RemoteException;
     public Message broadcast(String s) throws RemoteException;
     public void receive(Message msg) throws RemoteException;
