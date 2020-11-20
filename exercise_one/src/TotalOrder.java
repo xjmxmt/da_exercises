@@ -1,26 +1,44 @@
+import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.util.*;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class TotalOrder implements TotalOrderInterfaceRMI {
+
     private int id;
     private String name;
-    private int time = 0;
+    private long time = 0;
     private int timeUnit = 1;
-    private TotalOrder[] processList;
     private int threadNum;
-    private PriorityQueue<Message> receivedMsg = new PriorityQueue<Message>(new Comparator<Message>() {
+    private TotalOrder[] processList = new TotalOrder[threadNum];
+    private PriorityQueue<Message> receivedMsg = new PriorityQueue<Message>(100, new Comparator<Message>() {
         @Override
         public int compare(Message o1, Message o2) {
             if (o1.scalarClock.isSmallerThan(o2.scalarClock)) return -1;
             else return 1;
         }
     });
-    private HashMap<ScalarClock, Integer> ackMap = new HashMap<>();
+    private TreeMap<ScalarClock, Integer> ackMap = new TreeMap<>();
     private LinkedList<Message> receivedOrderedMsg = new LinkedList<>();
     private LinkedList<Message> deliveredMsg = new LinkedList<>();
+    private PriorityQueue<Message> waitList = new PriorityQueue<Message>(100, new Comparator<Message>() {
+        @Override
+        public int compare(Message o1, Message o2) {
+            if (o1.scalarClock.isSmallerThan(o2.scalarClock)) return -1;
+            else return 1;
+        }
+    });
+    private Message lastMsg = null;
+    private long beginTime = time*threadNum+1;
 
-    public TotalOrder() {
+    private ReentrantLock lock = new ReentrantLock();
 
+    public String getWaitList() throws RemoteException {
+        return " wait list: " + this.waitList;
+    }
+
+    public TotalOrder(int threadNum) throws RemoteException, NotBoundException {
+        this.threadNum = threadNum;
     }
 
     @Override
@@ -55,25 +73,49 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
     }
 
     @Override
-    public void setAck(ScalarClock sc) throws RemoteException {
+    public void setAck(Message msg) throws RemoteException {
+        ScalarClock sc = msg.scalarClock;
         if (ackMap.get(sc) == null) ackMap.put(sc, 1);
         else {
             ackMap.put(sc, ackMap.get(sc) + 1);
             while (getReceivedMsg().size() != 0) {
                 Message front = getReceivedMsg().peek();
-                //System.out.println(id + " " + front);
                 assert front != null;
                 if (ackMap.get(front.scalarClock) == null) break;
                 if (ackMap.get(front.scalarClock) < threadNum - 1) break;
                 if (ackMap.get(front.scalarClock) == threadNum - 1) {
+                    boolean flag = false;
+                    Iterator it = ackMap.entrySet().iterator();
+                    while (it.hasNext()) {
+                        Map.Entry entry = (Map.Entry) it.next();
+                        ScalarClock key = (ScalarClock) entry.getKey();
+                        if (key.compareTo(front.scalarClock) == 1) break;
+                        if (key.compareTo(front.scalarClock) == -1) {
+                            flag = true;
+                            break;
+                        }
+                    }
+                    if (flag) break;
+                    ackMap.remove(front.scalarClock);
                     deliver(getReceivedMsg().poll());
                 }
             }
         }
-
     }
 
-    public HashMap<ScalarClock, Integer> getAckMap() throws RemoteException{
+    public void clearAck() throws RemoteException {
+        while (getReceivedMsg().size() != 0) {
+            Message front = getReceivedMsg().peek();
+            assert front != null;
+            if (ackMap.get(front.scalarClock) == null) break;
+            if (ackMap.get(front.scalarClock) < threadNum - 1) break;
+            if (ackMap.get(front.scalarClock) == threadNum - 1) {
+                deliver(getReceivedMsg().poll());
+            }
+        }
+    }
+
+    public TreeMap<ScalarClock, Integer> getAckMap() throws RemoteException{
         return ackMap;
     }
 
@@ -94,49 +136,88 @@ public class TotalOrder implements TotalOrderInterfaceRMI {
 
     @Override
     public Message broadcast(String s) throws RemoteException {
-        this.time += this.timeUnit;
         Message msg = new Message();
-        msg.setMessage(s, new ScalarClock(time, id));
+        msg.setMessage(s, new ScalarClock(time*threadNum+id, id));
+        this.time += this.timeUnit;
 
         // send message with RMI TotalOrder.receive()
-        this.receive(msg);
-        for (TotalOrder obj : processList)
-        if (obj != processList[id - 1])
-        {
-            new Thread(() -> {
-                try {
-                    Thread.sleep(new Random().nextInt(100));
-                    obj.receive(msg);
-                } catch (RemoteException | InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }).start();
+        for (TotalOrderInterfaceRMI obj : processList) {
+            try {
+                Thread.sleep(new Random().nextInt(100));
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            try {
+                obj.checkWaitList(msg);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
         }
-
         return msg;
+    }
+
+    @Override
+    public void checkWaitList(Message msg) throws RemoteException {
+        if (msg.scalarClock.time == beginTime) {
+            if (lastMsg == null) lastMsg = msg;
+            else {
+                waitList.add(lastMsg);
+                lastMsg = msg;
+            }
+            receive(msg);
+        } else {
+            if (lastMsg == null) lastMsg = msg;
+            else if (msg.scalarClock.time - lastMsg.scalarClock.time == timeUnit) {
+                lastMsg = msg;
+                receive(msg);
+            } else if (msg.scalarClock.time - lastMsg.scalarClock.time != timeUnit) {
+                waitList.add(msg);
+                while (waitList.size() != 0) {
+                    Message nextMsg = null;
+                    Message front = waitList.peek();
+                    assert front != null;
+                    if (front.scalarClock.time - lastMsg.scalarClock.time == timeUnit) nextMsg = waitList.poll();
+                    if (nextMsg != null) {
+                        lastMsg = nextMsg;
+                        receive(nextMsg);
+                    } else break;
+                }
+            }
+        }
+    }
+
+    public void clearWaitList() throws RemoteException {
+        while (waitList.size() != 0) {
+            Message nextMsg = null;
+            Message front = waitList.peek();
+            assert front != null;
+            if (front.scalarClock.time - lastMsg.scalarClock.time == timeUnit) nextMsg = waitList.poll();
+            if (nextMsg != null) {
+                lastMsg = nextMsg;
+                receive(nextMsg);
+            } else break;
+        }
     }
 
     @Override
     public void receive(Message msg) throws RemoteException {
         this.receivedMsg.add(msg);
         this.receivedOrderedMsg.add(msg);
-        for (TotalOrder p : processList)
-            if (p != processList[id - 1])
-            {
-                new Thread(() -> {
-                    try {
-                        Thread.sleep(new Random().nextInt(100));
-                        p.setAck(msg.scalarClock);
-                    } catch (RemoteException | InterruptedException e) {
-                        e.printStackTrace();
-                    }
-                }).start();
-
+        for (TotalOrder p : processList) {
+            if (p != processList[id - 1]) {
+                try {
+                    Thread.sleep(new Random().nextInt(100));
+                    p.setAck(msg);
+                } catch (RemoteException | InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
+        }
     }
 
     @Override
     public void deliver(Message msg) throws RemoteException {
+        System.out.println(this.getName() + " " + msg + " has been delivered.");
         this.deliveredMsg.add(msg);
     }
 }
