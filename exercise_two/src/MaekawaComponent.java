@@ -46,7 +46,7 @@ public class MaekawaComponent implements MaekawaInterfaceRMI {
     }
 
     @Override
-    public void buildRequestSet(int total) throws RemoteException {  // TODO: build real request sets
+    public void buildRequestSet(int total) throws RemoteException {
         for (int i=1; i <= total; i++){
             this.requestSet.add(i);
         }
@@ -92,7 +92,7 @@ public class MaekawaComponent implements MaekawaInterfaceRMI {
     }
 
     @Override
-    public synchronized void receiveAck(int sender, int i) throws RemoteException {   // TODO: is synchronized needed here?
+    public synchronized void receiveAck(int sender, int i) throws RemoteException {
         System.out.println("Process " + sender + " ACK " + i + " to Process " + id);
         int n = waitAck.get(i);
         if (n == 1) {

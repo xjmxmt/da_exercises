@@ -108,4 +108,4 @@ class MyThread implements Runnable {
 
 // TODO: deadlock detection (with scalar clock?)
 // TODO: randomness between access
-// TODO: other TODOs in Component
+// TODO: build real request sets in component
