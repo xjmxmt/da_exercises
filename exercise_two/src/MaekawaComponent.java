@@ -93,8 +93,11 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
     @Override
     public void request() throws RemoteException {
         no_grants.set(0);
+        timer.incrementAndGet();
+        int t = timer.intValue();
+        System.out.println(id + " request in time " + t);
         for (MaekawaInterfaceRMI component : requestSet) {
-            timer.incrementAndGet();  // increase at every step
+             // increase at every step
 //            new Thread ( () -> {
 //                try {
 //                    Thread.sleep((int)(Math.random()*5));  // delay
@@ -104,8 +107,9 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
 //                }
 //            }).start();
             try {
-                Thread.sleep((int)(Math.random()*5));  // delay
-                component.receiveRequest(new ScalarClock(timer.intValue(), this.id), this);
+
+                Thread.sleep((int)(Math.random()*20));  // delay
+                component.receiveRequest(new ScalarClock(t, this.id), this);
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -122,20 +126,26 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
 
     @Override
     public void receiveRequest(ScalarClock scalarClock, MaekawaInterfaceRMI sender) throws RemoteException {
+//        System.out.println(id + " receive from " + sender.getId());
         timer.incrementAndGet();
         if (!granted.get()) {
             current_grant.set(new Request(scalarClock, sender));
 //            receivedRqst.add(current_grant.get());
             granted.set(true);
+            System.out.println(id + " grant " + sender.getId());
             sender.receiveGrant();
         } else {
-            receivedRqst.add(new Request(scalarClock, sender));
             Request head = receivedRqst.peek();
-            if (current_grant.get().getScalarClock().isSmallerThan(scalarClock) || head.getScalarClock().isSmallerThan(scalarClock)) {
+            receivedRqst.add(new Request(scalarClock, sender));
+ //           System.out.println(scalarClock.toString() + current_grant.get().getScalarClock().toString());
+ //           if (head != null) {
+ //               System.out.println(head.getScalarClock().toString());
+ //           }
+            if (current_grant.get().getScalarClock().isSmallerThan(scalarClock) || head != null && head.getScalarClock().isSmallerThan(scalarClock)) {
                 sender.receivePostpone();
             } else if (!inquiring.get()) {
                 inquiring.set(true);
-                sender.receiveInquire(this);
+                current_grant.get().getSender().receiveInquire(this);
             }
         }
     }
@@ -158,6 +168,11 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
     @Override
     public void doSomeOperations() throws RemoteException {
         //System.out.println(getName() + " enter critical region.");
+        try {
+            Thread.sleep((int) (Math.random() * 10 + 10));
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
         msg.incrementContent();
         msg.printMsg(new ScalarClock(timer.intValue(), id));
     }
@@ -169,9 +184,11 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
         inquiring.set(false);
 //        receivedRqst.remove(current_grant.get());
 //        current_grant.set(null);
+//        System.out.println(id + " releasing with " + receivedRqst);
         if (receivedRqst.size() != 0) {
             current_grant.set(receivedRqst.poll());
             MaekawaInterfaceRMI receiver = current_grant.get().getSender();
+            System.out.println(id + " release & grant to " + receiver.getId());
             granted.set(true);
             receiver.receiveGrant();
         }
@@ -179,16 +196,18 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
 
     @Override
     public void receivePostpone() throws RemoteException {
+        System.out.println(id + " postponed");
         timer.incrementAndGet();
         postponed.set(true);
     }
 
     @Override
     public void receiveInquire(MaekawaInterfaceRMI sender) throws RemoteException {
+        System.out.println(sender.getId() + " inquire " + id);
         timer.incrementAndGet();
         while (!postponed.get() && no_grants.intValue() != requestSet.length) {
             try {
-                Thread.sleep(5);  // waiting
+                Thread.sleep(1);  // waiting
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -201,6 +220,7 @@ public class MaekawaComponent extends UnicastRemoteObject implements MaekawaInte
 
     @Override
     public void receiveRelinquish() throws RemoteException {
+        System.out.println(current_grant.get() + " relinquished");
         inquiring.set(false);
         granted.set(false);
         receivedRqst.add(current_grant.get());
